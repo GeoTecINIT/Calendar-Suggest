@@ -23,6 +23,7 @@ This is a service mounted on a Node.js and MongoDB to provide suggested places d
 + mongodb
 + node-geocoder
 + node-foursquare-venues
++ q
 
 More capabilities comming soon! 
 Any further comments, write me!

@@ -1,8 +1,10 @@
 var fs = require('fs');
-
 var readline = require('readline');
 var google = require('googleapis');
 var googleAuth = require('google-auth-library');
+var http = require('http');
+var https = require('https');
+var Q = require('q');
 
 //Load MongoDB service
 var MongoClient = require('mongodb').MongoClient;
@@ -124,7 +126,8 @@ function storeToken(token) {
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
 function listEvents(auth) {
-  var calendar = google.calendar('v3');
+	var calendar = google.calendar('v3');
+	
   calendar.events.list({
     auth: auth,
     calendarId: 'primary',
@@ -151,15 +154,65 @@ function listEvents(auth) {
 			geocoder.geocode(eloc, function(err, res){	
 				if(err){console.log('geocoder error: '+err);}
 				else{
-					var latlng = res[0].latitude+','+res[0].longitude;
+					
+					latlng = res[0].latitude+','+res[0].longitude;
+				
 					foursquare.venues.explore({ll: latlng, query: 'bar'}, function(error, response){
 						if (error) { return console.error('foursquare error: '+error) }
 						var venues = response.response.groups[0].items;
 							console.log('Lugares recomendados por Foursquare:');
 						  // imprimir cada lugar por su nombre
-						  for (var i = 10; i >= 0; i--) {
-						  	console.log(venues[i].venue.name+' en '+venues[i].venue.location.address+' con una valoración de '+venues[i].venue.rating);
-						  }
+							var responses = [];
+							var completed_requests = 0;
+						  	// Petición de los tiempos de viaje a google Distance Matrix
+							for(v in venues){
+								var options = { 
+							  	 	   host: 'maps.googleapis.com',
+							  	 	   path: '/maps/api/distancematrix/json?origins='+latlng+'&destinations='+venues[v].venue.location.lat+','+venues[v].venue.location.lng+'&language=Es-ES&mode=walking&key='+Keys.GoogleKeys.apikey
+							  	  }
+								promisedRequest(options, venues).then(function(chunk) { //callback invoked on deferred.resolve
+									chunkjson = JSON.parse(chunk);
+							  		//console.log(chunkjson['rows'][0]['elements'][0]['duration']['text']);
+									//return chunkjson['rows'][0]['elements'][0]['duration']['text'];
+								//	console.log(chunk); 
+									//console.log(venues[v].venue.name+' en '+venues[v].venue.location.address+' con una valoración de '+venues[v].venue.rating+' en '+chunkjson['rows'][0]['elements'][0]['duration']['text']);
+									
+									responses.push(chunkjson);
+									completed_requests++;
+									// return chunk;
+									if(completed_requests++ == venues.length - 1) {
+									        // All downloads are completed
+											vtimes = responses;
+											for(vs in venues){
+												
+												console.log(venues[vs].venue.name+' en '+venues[vs].venue.location.address+' con una valoración de '+venues[vs].venue.rating+' está a '+vtimes[vs]['rows'][0]['elements'][0]['duration']['text']+' caminando.');
+											}
+									        //console.log('body:', responses.join());
+											
+									     }      
+								  },
+								  function(error) { //callback invoked on deferred.reject
+									  console.log(error);
+								  });
+							
+								
+							} 
+							
+							/* var req = https.request(options, (res) => {
+								 
+								  res.setEncoding('utf8');
+							  	res.on('data', (chunk) => {
+									chunkjson = JSON.parse(chunk);
+							  		console.log(chunkjson['rows'][0]['elements'][0]['duration']['text']);
+							  	});
+
+							  }).end();
+								*/
+							//console.log(venues[i].venue.name+' en '+venues[i].venue.location.address+' con una valoración de '+venues[i].venue.rating+' en ');
+							  	
+							
+							
+						  
 					});
 					
 				}
@@ -183,3 +236,33 @@ function saveEvents(events){
 	});
 }
 
+
+function promisedRequest(requestOptions, venues) {
+//create a deferred object from Q
+var deferred  = Q.defer();
+var req = https.request(requestOptions, function(response) {
+//set the response encoding to parse json string
+response.setEncoding('utf8');
+var responseData = '';
+//append data to responseData variable on the 'data' event emission
+response.on('data', function(data) {
+	  	responseData += data;
+	  });
+//listen to the 'end' event
+response.on('end', function() {
+//resolve the deferred object with the response
+deferred.resolve(responseData);
+	  });
+	});
+//listen to the 'error' event
+req.on('error', function(err) {
+//if an error occurs reject the deferred
+deferred.reject(err);
+	});
+req.end();
+//we are returning a promise object
+//if we returned the deferred object
+//deferred object reject and resolve could potentially be modified
+//violating the expected behavior of this function
+return deferred.promise;
+};
